@@ -1,0 +1,51 @@
+{
+  "name": "mapsight/embed",
+  "description": "PHP host library: emit Mapsight embed fragments (client-only + SSR try/fallback)",
+  "type": "library",
+  "keywords": [
+    "mapsight",
+    "embed",
+    "ssr"
+  ],
+  "homepage": "https://github.com/open-mapsight/embed",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Paul Golmann",
+      "email": "mail@pje-web.de",
+      "role": "Developer"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/open-mapsight/embed/issues",
+    "source": "https://github.com/open-mapsight/embed"
+  },
+  "require": {
+    "php": "^8.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.0"
+  },
+  "suggest": {
+    "ext-curl": "Separate connect vs total timeouts when calling the SSR sidecar"
+  },
+  "autoload": {
+    "psr-4": {
+      "OpenMapsight\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "OpenMapsight\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "platform": {
+      "php": "8.2.99"
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "test": "phpunit"
+  }
+}
