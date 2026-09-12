@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace OpenMapsight\Embed;
 
 /**
- * Outcome of {@see SsrPublish::afterFeatureSourcePublish()}.
+ * Outcome of {@see SsrClient::purge()}.
  *
  * `sidecarPurged` is true only after a successful sidecar POST. A failed
  * purge leaves the PHP fragment cache alone so the next render cannot
  * refill it from a still-stale sidecar.
  */
-final class SsrPurgeResult
+final class PurgeResult
 {
     /**
      * @param list<string> $deletedKeys

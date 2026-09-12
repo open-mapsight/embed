@@ -9,8 +9,11 @@ namespace OpenMapsight\Embed;
  */
 final class SsrV1Document
 {
-    public static function fromResponse(string $body): SsrDocument
-    {
+    public static function fromResponse(
+        string $body,
+        string $containerId,
+        int $maxStateBytes = 262144,
+    ): SsrDocument {
         if (str_starts_with($body, "\xEF\xBB\xBF")) {
             $body = substr($body, 3);
         }
@@ -21,12 +24,15 @@ final class SsrV1Document
             throw new SsrClientError('SSR v1 response is not JSON', 0, $e);
         }
 
-        if (!is_array($data) || ($data['v'] ?? null) !== 1) {
-            throw new SsrClientError('SSR v1 response missing v=1');
+        if (!is_array($data) || ($data['v'] ?? null) !== SsrContract::VERSION) {
+            throw new SsrClientError('SSR v1 response missing v=' . SsrContract::VERSION);
         }
 
         if (isset($data['error'])) {
-            $code = is_array($data['error']) ? (string) ($data['error']['code'] ?? 'RENDER_FAILED') : 'RENDER_FAILED';
+            $code = 'RENDER_FAILED';
+            if (is_array($data['error']) && isset($data['error']['code']) && is_string($data['error']['code'])) {
+                $code = $data['error']['code'];
+            }
             throw new SsrClientError('SSR v1 error ' . $code);
         }
 
@@ -40,26 +46,37 @@ final class SsrV1Document
         }
 
         return new SsrDocument(
-            self::withDehydratedState($html, $data['state']),
+            self::withDehydratedState($html, $data['state'], $containerId, $maxStateBytes),
             PlacePageMeta::tryFrom($data['pageMeta'] ?? null),
         );
     }
 
-    public static function containerHtmlFromResponse(string $body): string
-    {
-        return self::fromResponse($body)->html;
+    public static function containerHtmlFromResponse(
+        string $body,
+        string $containerId = 'mapsight-embed-1',
+        int $maxStateBytes = 262144,
+    ): string {
+        return self::fromResponse($body, $containerId, $maxStateBytes)->html;
     }
 
-    public static function withDehydratedState(string $html, mixed $state): string
-    {
+    public static function withDehydratedState(
+        string $html,
+        mixed $state,
+        string $containerId,
+        int $maxStateBytes = 262144,
+    ): string {
         $json = json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        if (strlen($json) > $maxStateBytes) {
+            throw new SsrClientError('SSR v1 state exceeds size cap');
+        }
         $escaped = htmlspecialchars($json, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $html = trim($html);
         $end = self::openingTagEnd($html);
         $opening = substr($html, 0, $end + 1);
+        self::assertContainerId($opening, $containerId);
 
         $opening = preg_replace(
-            '/\sdata-dehydrated-state=(?:"[^"]*"|\'[^\']*\')/',
+            '/\sdata-dehydrated-state=(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/',
             '',
             $opening,
         ) ?? $opening;
@@ -99,5 +116,19 @@ final class SsrV1Document
         }
 
         throw new SsrClientError('SSR v1 html has no opening element');
+    }
+
+    private static function assertContainerId(string $opening, string $containerId): void
+    {
+        if (preg_match('/\sid=(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/', $opening, $matches) !== 1) {
+            throw new SsrClientError('SSR v1 html root id does not match containerId');
+        }
+        $quoted = $matches[1];
+        $single = $matches[2] ?? '';
+        $unquoted = $matches[3] ?? '';
+        $id = $quoted !== '' ? $quoted : ($single !== '' ? $single : $unquoted);
+        if ($id !== $containerId) {
+            throw new SsrClientError('SSR v1 html root id does not match containerId');
+        }
     }
 }

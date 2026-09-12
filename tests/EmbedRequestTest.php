@@ -33,13 +33,25 @@ final class EmbedRequestTest extends TestCase
         );
     }
 
+    public function test_rejects_invalid_container_id(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('containerId must match');
+
+        new EmbedRequest(
+            preset: 'simpleMap',
+            containerId: '1bad',
+            config: [],
+        );
+    }
+
     public function test_rejects_request_id_with_crlf(): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('requestId must match');
 
         new EmbedRequest(
-            preset: 'infosite',
+            preset: 'simpleMap',
             containerId: 'mapsight-embed-1',
             config: [],
             requestId: "abc\r\nX-Injected: yes",
@@ -52,11 +64,24 @@ final class EmbedRequestTest extends TestCase
         $this->expectExceptionMessage('assetVersion must match');
 
         new EmbedRequest(
-            preset: 'infosite',
+            preset: 'simpleMap',
             containerId: 'mapsight-embed-1',
             config: [],
             assetVersion: 'assets 9',
         );
+    }
+
+    public function test_does_not_read_server_or_config_fallbacks(): void
+    {
+        $_SERVER['REQUEST_URI'] = '/from-sapi';
+        $request = new EmbedRequest(
+            preset: 'simpleMap',
+            containerId: 'mapsight-embed-1',
+            config: ['requestUrl' => '/from-config'],
+        );
+
+        $this->assertNull($request->requestUrl);
+        unset($_SERVER['REQUEST_URI']);
     }
 
     public function test_accepts_header_safe_tokens(): void

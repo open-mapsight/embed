@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "html": "<div id=\"mapsight-embed-1\" class=\"mapsight-embed\"></div>",
+  "state": {
+    "app": {
+      "ssr": "v1"
+    }
+  },
+  "pageMeta": null
+}
