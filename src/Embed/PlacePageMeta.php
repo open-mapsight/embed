@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace OpenMapsight\Embed;
 
 /**
- * Selected-feature or Stadtplan-module document meta from sidecar `renderEnvelope()`.
+ * Selected-feature or topic document meta from sidecar `renderEnvelope()`.
  *
  * Fail-open: {@see tryFrom()} returns null when the payload is missing or incomplete.
- * `canonicalUrl` / `og.url` are the page permalink, never `schema.url`.
+ * `canonicalUrl` / `og.url` / `og.image` must be absolute `http(s)` URLs.
  */
 final class PlacePageMeta
 {
@@ -32,7 +32,7 @@ final class PlacePageMeta
 
         $title = self::nonEmptyString($value['title'] ?? null);
         $description = self::nonEmptyString($value['description'] ?? null);
-        $canonicalUrl = self::nonEmptyString($value['canonicalUrl'] ?? null);
+        $canonicalUrl = self::httpUrl($value['canonicalUrl'] ?? null);
         $ogRaw = $value['og'] ?? null;
         $jsonLd = $value['jsonLd'] ?? null;
         if (
@@ -47,9 +47,9 @@ final class PlacePageMeta
 
         $ogTitle = self::nonEmptyString($ogRaw['title'] ?? null);
         $ogDescription = self::nonEmptyString($ogRaw['description'] ?? null);
-        $ogUrl = self::nonEmptyString($ogRaw['url'] ?? null);
+        $ogUrl = self::httpUrl($ogRaw['url'] ?? null);
         $ogType = self::nonEmptyString($ogRaw['type'] ?? null);
-        $ogImage = self::nonEmptyString($ogRaw['image'] ?? null);
+        $ogImage = self::httpUrl($ogRaw['image'] ?? null);
         if (
             $ogTitle === null
             || $ogDescription === null
@@ -61,12 +61,19 @@ final class PlacePageMeta
             return null;
         }
 
+        $jsonLdByKey = [];
+        foreach ($jsonLd as $key => $item) {
+            if (is_string($key)) {
+                $jsonLdByKey[$key] = $item;
+            }
+        }
+
         return new self(
             $title,
             $description,
             $canonicalUrl,
             new PlacePageMetaOg($ogTitle, $ogDescription, $ogUrl, $ogType, $ogImage),
-            $jsonLd,
+            $jsonLdByKey,
         );
     }
 
@@ -78,5 +85,15 @@ final class PlacePageMeta
         $trimmed = trim($value);
 
         return $trimmed !== '' ? $trimmed : null;
+    }
+
+    private static function httpUrl(mixed $value): ?string
+    {
+        $url = self::nonEmptyString($value);
+        if ($url === null || preg_match('#^https?://#i', $url) !== 1) {
+            return null;
+        }
+
+        return $url;
     }
 }

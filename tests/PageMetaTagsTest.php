@@ -19,6 +19,7 @@ final class PageMetaTagsTest extends TestCase
             '<link rel="canonical" href="https://www.example.com/map?feature=poi-1">',
             $html,
         );
+        $this->assertStringContainsString('name="description" content="An example place."', $html);
         $this->assertStringContainsString('property="og:title" content="Town Hall"', $html);
         $this->assertStringContainsString('property="og:type" content="place"', $html);
         $this->assertStringContainsString(
@@ -37,6 +38,32 @@ final class PageMetaTagsTest extends TestCase
         $this->assertNull(PlacePageMeta::tryFrom(null));
         $this->assertNull(PlacePageMeta::tryFrom(['title' => 'only']));
         $this->assertNull(PlacePageMeta::tryFrom('Town Hall'));
+    }
+
+    public function test_try_from_rejects_unknown_og_type_and_non_http_urls(): void
+    {
+        $base = [
+            'title' => 'Town Hall',
+            'description' => 'An example place.',
+            'canonicalUrl' => 'https://www.example.com/map?feature=poi-1',
+            'og' => [
+                'title' => 'Town Hall',
+                'description' => 'An example place.',
+                'url' => 'https://www.example.com/map?feature=poi-1',
+                'type' => 'article',
+                'image' => 'https://www.example.com/plan/img/og-default.png',
+            ],
+            'jsonLd' => ['@type' => 'Place'],
+        ];
+        $this->assertNull(PlacePageMeta::tryFrom($base));
+
+        $base['og']['type'] = 'place';
+        $base['canonicalUrl'] = '/map?feature=poi-1';
+        $this->assertNull(PlacePageMeta::tryFrom($base));
+
+        $base['canonicalUrl'] = 'https://www.example.com/map?feature=poi-1';
+        $base['og']['image'] = 'javascript:alert(1)';
+        $this->assertNull(PlacePageMeta::tryFrom($base));
     }
 
     private static function sample(): PlacePageMeta
