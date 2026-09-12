@@ -2,14 +2,31 @@
 
 ## Unreleased
 
-- Validate `preset` as a JS identifier and `requestId` / `assetVersion` as header-safe tokens.
-- Forward `locale` and `deviceClass` to the sidecar in `options`.
-- Look up the SSR result cache before consulting the circuit breaker.
-- Trip the breaker only on `SsrUnavailable` (connect / timeout / 5xx), not client or parse errors.
-- Reject SSR HTML that does not start with a real element (no comment injection).
-- Accept only v1 JSON from the sidecar; strip a UTF-8 BOM. Remove deprecated `curl_close()`.
-- Cache-bust `mapsight.css` with `?v=` like the module imports.
-- `SsrPublish::afterFeatureSourcePublish()` returns `SsrPurgeResult`. Blank URL lists are an error, not a purge-all. A failed sidecar purge no longer flushes the PHP cache.
+Breaking 0.4.0 reshape. Placement data and sidecar configuration are split:
+`EmbedRequest` is a placement value object; `SsrClient` is built once and
+shared by `Renderer` and `SsrPublish`. `render()` returns `RenderedEmbed`
+(the HTML-only method is gone). `SsrPublish::purge()` replaces
+`afterFeatureSourcePublish()` and returns `PurgeResult`.
+
+- No implicit `$_SERVER` / `getenv` / `config` key fallbacks. `config` is
+  opaque; the library still writes documented v1 option keys over it.
+- Share params (`feature`, `module` by default) whitelist `requestUrl` for
+  the cache key, sidecar payload, and pageMeta gate.
+- `psr/log` and `psr/simple-cache` are the only runtime dependencies.
+  Optional `Psr16SsrResultCache`. Cache `set()` takes a TTL (default 3600 s).
+- `SsrTransport::send()` returns raw HTTP. The client owns the v1 contract.
+- `RenderedEmbed` exposes `ssr` / `ssrReason` / `ssrDurationMs` and fragment
+  parts (`stylesheetHtml`, `preloadHtml`, `containerHtml`, `bootScriptHtml`).
+- Validate `preset`, `containerId`, `requestId`, `assetVersion`. Forward
+  `locale` / `deviceClass`. Optional `scriptNonce`. JS strings use
+  `json_encode` + `JSON_HEX_*`.
+- Cache before breaker. Breaker counts only connect / timeout / 5xx.
+- v1 HTML must start with `<[A-Za-z]` and match `containerId`. JSON only,
+  BOM stripped, response and state size caps. `curl_close()` removed.
+- CSS `?v=`, `modulepreload`, transport protocol / `Expect` / no-follow
+  hardening. `health()` and `warm()`. `Testing\FakeSsrTransport`.
+- PHPStan at max, `composer validate --strict`, `--prefer-lowest` CI,
+  `failOnDeprecation`. `SECURITY.md`.
 
 ## 0.3.0 — 2026-09-12
 
