@@ -11,28 +11,32 @@ final class SsrV1Document
 {
     public static function fromResponse(string $body): SsrDocument
     {
+        if (str_starts_with($body, "\xEF\xBB\xBF")) {
+            $body = substr($body, 3);
+        }
+
         try {
             $data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
-            throw new \RuntimeException('SSR v1 response is not JSON', 0, $e);
+            throw new SsrClientError('SSR v1 response is not JSON', 0, $e);
         }
 
         if (!is_array($data) || ($data['v'] ?? null) !== 1) {
-            throw new \RuntimeException('SSR v1 response missing v=1');
+            throw new SsrClientError('SSR v1 response missing v=1');
         }
 
         if (isset($data['error'])) {
             $code = is_array($data['error']) ? (string) ($data['error']['code'] ?? 'RENDER_FAILED') : 'RENDER_FAILED';
-            throw new \RuntimeException('SSR v1 error ' . $code);
+            throw new SsrClientError('SSR v1 error ' . $code);
         }
 
         $html = $data['html'] ?? null;
         if (!is_string($html) || trim($html) === '') {
-            throw new \RuntimeException('SSR v1 html missing');
+            throw new SsrClientError('SSR v1 html missing');
         }
 
         if (!array_key_exists('state', $data)) {
-            throw new \RuntimeException('SSR v1 state missing');
+            throw new SsrClientError('SSR v1 state missing');
         }
 
         return new SsrDocument(
@@ -60,7 +64,7 @@ final class SsrV1Document
             $opening,
         ) ?? $opening;
         if (!str_ends_with($opening, '>')) {
-            throw new \RuntimeException('SSR v1 html has no opening element');
+            throw new SsrClientError('SSR v1 html has no opening element');
         }
 
         $opening = substr($opening, 0, -1) . ' data-dehydrated-state="' . $escaped . '">';
@@ -71,8 +75,8 @@ final class SsrV1Document
     /** First `>` that is not inside a quoted attribute (OSM attribution has raw `>`). */
     private static function openingTagEnd(string $html): int
     {
-        if ($html === '' || $html[0] !== '<') {
-            throw new \RuntimeException('SSR v1 html has no opening element');
+        if ($html === '' || preg_match('/^<[A-Za-z]/', $html) !== 1) {
+            throw new SsrClientError('SSR v1 html has no opening element');
         }
 
         $quote = null;
@@ -94,6 +98,6 @@ final class SsrV1Document
             }
         }
 
-        throw new \RuntimeException('SSR v1 html has no opening element');
+        throw new SsrClientError('SSR v1 html has no opening element');
     }
 }

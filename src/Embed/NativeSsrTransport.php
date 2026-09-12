@@ -18,9 +18,13 @@ final class NativeSsrTransport implements SsrTransport
         array $headers = [],
         float $connectTimeoutSeconds = 0.1,
     ): SsrDocument {
-        $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        try {
+            $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new SsrClientError('SSR request body is not JSON', 0, $e);
+        }
         if (strlen($json) > self::MAX_BODY_BYTES) {
-            throw new \RuntimeException('SSR request body exceeds size cap');
+            throw new SsrClientError('SSR request body exceeds size cap');
         }
 
         if (function_exists('curl_init')) {
@@ -47,7 +51,7 @@ final class NativeSsrTransport implements SsrTransport
 
         $handle = curl_init($url);
         if ($handle === false) {
-            throw new \RuntimeException('SSR request failed');
+            throw new SsrUnavailable('SSR request failed');
         }
 
         curl_setopt_array($handle, [
@@ -62,14 +66,17 @@ final class NativeSsrTransport implements SsrTransport
         $body = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
         $error = curl_error($handle);
-        curl_close($handle);
+        unset($handle);
 
         if ($body === false) {
-            throw new \RuntimeException($error !== '' ? $error : 'SSR request failed');
+            throw new SsrUnavailable($error !== '' ? $error : 'SSR request failed');
         }
 
+        if ($status >= 400 && $status < 500) {
+            throw new SsrClientError('SSR HTTP status ' . $status);
+        }
         if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException('SSR HTTP status ' . $status);
+            throw new SsrUnavailable('SSR HTTP status ' . $status);
         }
 
         return $body;
@@ -100,7 +107,7 @@ final class NativeSsrTransport implements SsrTransport
 
         $body = @file_get_contents($url, false, $context);
         if ($body === false) {
-            throw new \RuntimeException('SSR request failed');
+            throw new SsrUnavailable('SSR request failed');
         }
 
         $status = 0;
@@ -110,8 +117,11 @@ final class NativeSsrTransport implements SsrTransport
             $status = (int) $matches[1];
         }
 
+        if ($status >= 400 && $status < 500) {
+            throw new SsrClientError('SSR HTTP status ' . $status);
+        }
         if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException('SSR HTTP status ' . $status);
+            throw new SsrUnavailable('SSR HTTP status ' . $status);
         }
 
         return $body;
@@ -119,15 +129,6 @@ final class NativeSsrTransport implements SsrTransport
 
     private function finish(string $body): SsrDocument
     {
-        $trimmed = ltrim($body);
-        if (str_starts_with($trimmed, '{')) {
-            return SsrV1Document::fromResponse($body);
-        }
-
-        if ($body === '' || !str_contains($body, 'data-dehydrated-state')) {
-            throw new \RuntimeException('SSR response missing dehydrated state');
-        }
-
-        return new SsrDocument($body, null);
+        return SsrV1Document::fromResponse($body);
     }
 }

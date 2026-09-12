@@ -11,8 +11,10 @@ use OpenMapsight\Embed\PlacePageMetaOg;
 use OpenMapsight\Embed\ProcessSsrCircuitBreaker;
 use OpenMapsight\Embed\Renderer;
 use OpenMapsight\Embed\SsrCacheKey;
+use OpenMapsight\Embed\SsrClientError;
 use OpenMapsight\Embed\SsrDocument;
 use OpenMapsight\Embed\SsrTransport;
+use OpenMapsight\Embed\SsrUnavailable;
 use PHPUnit\Framework\TestCase;
 
 final class RendererTest extends TestCase
@@ -125,6 +127,10 @@ final class RendererTest extends TestCase
 
         $this->assertStringContainsString('data-dehydrated-state=', $html);
         $this->assertStringContainsString(
+            'href="/mapsight/plan/assets/mapsight.css?v=assets-9"',
+            $html,
+        );
+        $this->assertStringContainsString(
             'import {mountEmbed} from "/mapsight/plan/assets/embed.js?v=assets-9"',
             $html,
         );
@@ -218,7 +224,7 @@ final class RendererTest extends TestCase
                 float $connectTimeoutSeconds = 0.1,
             ): SsrDocument {
                 $this->calls++;
-                throw new \RuntimeException('sidecar down');
+                throw new SsrUnavailable('sidecar down');
             }
         };
         $renderer = new Renderer(
@@ -252,6 +258,9 @@ final class RendererTest extends TestCase
         $transport = new class implements SsrTransport {
             public int $calls = 0;
 
+            /** @var array<string, mixed>|null */
+            public ?array $payload = null;
+
             public function postJson(
                 string $url,
                 array $payload,
@@ -260,6 +269,7 @@ final class RendererTest extends TestCase
                 float $connectTimeoutSeconds = 0.1,
             ): SsrDocument {
                 $this->calls++;
+                $this->payload = $payload;
 
                 return new SsrDocument('<div id="mapsight-embed-cache" class="mapsight-embed" data-dehydrated-state="{&quot;app&quot;:{&quot;n&quot;:'
                     . $this->calls
@@ -282,6 +292,8 @@ final class RendererTest extends TestCase
         $second = $renderer->render($request);
 
         $this->assertSame(1, $transport->calls);
+        $this->assertSame('de', $transport->payload['options']['locale'] ?? null);
+        $this->assertSame('desktop', $transport->payload['options']['deviceClass'] ?? null);
         $this->assertStringContainsString('data-dehydrated-state=', $first);
         $this->assertSame($first, $second);
         $this->assertStringNotContainsString('mapsight-ssr-skipped', $second);
@@ -345,6 +357,112 @@ final class RendererTest extends TestCase
             '/map/?module=baustellen-verkehr',
             $transport->payload['options']['requestUrl'] ?? null,
         );
+    }
+
+    public function test_ssr_payload_forwards_locale_and_device_class(): void
+    {
+        $transport = new class implements SsrTransport {
+            /** @var array<string, mixed>|null */
+            public ?array $payload = null;
+
+            public function postJson(
+                string $url,
+                array $payload,
+                float $timeoutSeconds,
+                array $headers = [],
+                float $connectTimeoutSeconds = 0.1,
+            ): SsrDocument {
+                $this->payload = $payload;
+
+                return new SsrDocument('<div id="mapsight-embed-locale" class="mapsight-embed" data-dehydrated-state="{}"></div>');
+            }
+        };
+
+        (new Renderer($transport))->render(new EmbedRequest(
+            preset: 'infosite',
+            containerId: 'mapsight-embed-locale',
+            config: ['imagesUrl' => '/mapsight/plan/img/'],
+            ssrUrl: 'http://ssr:4123',
+            locale: 'de',
+            deviceClass: 'mobile',
+        ));
+
+        $this->assertSame('de', $transport->payload['options']['locale'] ?? null);
+        $this->assertSame('mobile', $transport->payload['options']['deviceClass'] ?? null);
+    }
+
+    public function test_open_circuit_still_serves_warm_cache(): void
+    {
+        $transport = new class implements SsrTransport {
+            public int $calls = 0;
+
+            public function postJson(
+                string $url,
+                array $payload,
+                float $timeoutSeconds,
+                array $headers = [],
+                float $connectTimeoutSeconds = 0.1,
+            ): SsrDocument {
+                $this->calls++;
+
+                return new SsrDocument('<div id="mapsight-embed-warm" class="mapsight-embed" data-dehydrated-state="{&quot;n&quot;:1}"></div>');
+            }
+        };
+        $cache = new ArraySsrResultCache();
+        $breaker = new ProcessSsrCircuitBreaker(1, 60.0);
+        $renderer = new Renderer($transport, $breaker, $cache);
+        $request = new EmbedRequest(
+            preset: 'infosite',
+            containerId: 'mapsight-embed-warm',
+            config: ['imagesUrl' => '/mapsight/plan/img/'],
+            ssrUrl: 'http://ssr:4123',
+        );
+
+        $warm = $renderer->render($request);
+        $breaker->recordFailure();
+        $this->assertFalse($breaker->allow());
+
+        $served = $renderer->render($request);
+
+        $this->assertSame(1, $transport->calls);
+        $this->assertSame($warm, $served);
+        $this->assertStringNotContainsString('mapsight-ssr-skipped', $served);
+        $this->assertStringContainsString('data-dehydrated-state=', $served);
+    }
+
+    public function test_client_errors_do_not_trip_the_breaker(): void
+    {
+        $transport = new class implements SsrTransport {
+            public int $calls = 0;
+
+            public function postJson(
+                string $url,
+                array $payload,
+                float $timeoutSeconds,
+                array $headers = [],
+                float $connectTimeoutSeconds = 0.1,
+            ): SsrDocument {
+                $this->calls++;
+                throw new SsrClientError('SSR v1 error VALIDATION');
+            }
+        };
+        $renderer = new Renderer(
+            $transport,
+            new ProcessSsrCircuitBreaker(2, 10.0),
+        );
+        $request = new EmbedRequest(
+            preset: 'infosite',
+            containerId: 'mapsight-embed-client-error',
+            config: ['imagesUrl' => '/mapsight/plan/img/'],
+            ssrUrl: 'http://ssr:4123',
+        );
+
+        $renderer->render($request);
+        $renderer->render($request);
+        $third = $renderer->render($request);
+
+        $this->assertSame(3, $transport->calls);
+        $this->assertStringContainsString('<!-- mapsight-ssr-skipped -->', $third);
     }
 
     public function test_cache_key_includes_request_url(): void

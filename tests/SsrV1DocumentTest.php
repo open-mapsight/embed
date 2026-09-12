@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OpenMapsight\Tests;
 
+use OpenMapsight\Embed\SsrClientError;
 use OpenMapsight\Embed\SsrV1Document;
 use PHPUnit\Framework\TestCase;
 
@@ -118,11 +119,42 @@ final class SsrV1DocumentTest extends TestCase
 
     public function test_rejects_error_payload(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(SsrClientError::class);
 
         SsrV1Document::containerHtmlFromResponse(json_encode([
             'v' => 1,
             'error' => ['code' => 'RENDER_FAILED', 'message' => 'render failed'],
         ], JSON_THROW_ON_ERROR));
+    }
+
+    public function test_rejects_html_that_starts_with_a_comment(): void
+    {
+        $this->expectException(SsrClientError::class);
+        $this->expectExceptionMessage('SSR v1 html has no opening element');
+
+        SsrV1Document::containerHtmlFromResponse(json_encode([
+            'v' => 1,
+            'html' => '<!-- ssr --><div id="c"></div>',
+            'state' => ['a' => 1],
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    public function test_accepts_utf8_bom_before_json(): void
+    {
+        $html = SsrV1Document::containerHtmlFromResponse("\xEF\xBB\xBF" . json_encode([
+            'v' => 1,
+            'html' => '<div id="mapsight-embed-1" class="mapsight-embed"></div>',
+            'state' => ['app' => ['ssr' => 'v1']],
+        ], JSON_THROW_ON_ERROR));
+
+        $this->assertSame(['app' => ['ssr' => 'v1']], $this->dehydratedState($html));
+    }
+
+    public function test_rejects_raw_html_body(): void
+    {
+        $this->expectException(SsrClientError::class);
+        $this->expectExceptionMessage('SSR v1 response is not JSON');
+
+        SsrV1Document::fromResponse('<div id="c" data-dehydrated-state="{}"></div>');
     }
 }

@@ -95,9 +95,13 @@ echo $result->html;
 `?module=` *and* the sidecar returned meta. Apply it with your CMS title /
 canonical / OG / JSON-LD APIs. Do not inject head tags into the fragment.
 
-`preset` becomes `/assets/{preset}.js` next to `embed.js` under `assetBase`.
+`preset` becomes `/assets/{preset}.js` next to `embed.js` under `assetBase`
+and is interpolated as a JS import binding, so it must be a JavaScript
+identifier (not `my-map`, not a reserved word).
 `containerClassName` is optional; if you pass it, the empty mount and the
 sidecar request both get that class.
+`locale` and `deviceClass` are forwarded in the sidecar `options` when set.
+`assetVersion` cache-busts `mapsight.css` as well as the module imports.
 
 Pass `requestUrl` (path + search, typically `REQUEST_URI`) and, when that URL
 is path-only, `pageOrigin` so the sidecar can make absolute canonical / `og:url`
@@ -131,8 +135,10 @@ Timeouts are split: `ssrConnectTimeoutSeconds` (default 0.1) and
 failures a process-local breaker skips Node for 15s.
 
 Pass an `SsrResultCache` (e.g. `ArraySsrResultCache`, or your Redis adapter)
-to skip Node on a warm `{html,state}` hit. The key is `SsrCacheKey`: config +
-locale + deviceClass + assetVersion + requestUrl + contract `v`.
+to skip Node on a warm `{html,state}` hit. The cache is consulted before the
+circuit breaker, so an open breaker still serves a warm fragment. The key is
+`SsrCacheKey`: config + locale + deviceClass + assetVersion + requestUrl +
+contract `v`. Those same locale / deviceClass values go to the sidecar.
 
 Wire and hydration details live in the Mapsight monorepo — do not fork them
 here:
@@ -148,17 +154,23 @@ here:
 ## Publish / purge
 
 When a feature-source or GeoJSON file changes, call `SsrPublish` **before** the
-next page render. It POSTs sidecar `/purge` (prefer absolute list URLs; omit to
-clear all) and `flush()`es the PHP fragment cache. Purging Node only still
-serves stale HTML from PHP.
+next page render. It POSTs sidecar `/purge` (prefer absolute list URLs; omit or
+pass `[]` to clear all) and `flush()`es the PHP fragment cache **only after a
+successful sidecar purge** (or when no sidecar URL is configured). A list that
+filters down to no URLs (e.g. `['']`) throws instead of purging everything.
+The return value is `SsrPurgeResult` (`sidecarPurged`, `deletedKeys`). Purging
+Node only still serves stale HTML from PHP.
 
 ```php
-(new \OpenMapsight\Embed\SsrPublish(
+$result = (new \OpenMapsight\Embed\SsrPublish(
     getenv('MAPSIGHT_SSR_URL') ?: null,
     $resultCache, // the SsrResultCache passed to Renderer, if any
 ))->afterFeatureSourcePublish([
     'https://www.example.com/geojson/places.geojson',
 ]);
+if (!$result->sidecarPurged) {
+    // sidecar URL unset, or POST failed — PHP cache was not flushed on failure
+}
 ```
 
 Do not use a feature-source revision env var as the bust protocol.

@@ -36,11 +36,12 @@ final class SsrPublishTest extends TestCase
         $cache->set('k1', new SsrDocument('<div data-dehydrated-state="{}"></div>'));
         $hook = new SsrPublish('http://ssr:4123', $cache, $transport);
 
-        $deleted = $hook->afterFeatureSourcePublish([
+        $result = $hook->afterFeatureSourcePublish([
             'https://example.test/schools.geojson',
         ]);
 
-        $this->assertSame(['doc::https://example.test/schools.geojson'], $deleted);
+        $this->assertTrue($result->sidecarPurged);
+        $this->assertSame(['doc::https://example.test/schools.geojson'], $result->deletedKeys);
         $this->assertSame(1, $transport->calls);
         $this->assertSame('http://ssr:4123/purge', $transport->requests[0]['url'] ?? null);
         $this->assertSame(
@@ -70,15 +71,16 @@ final class SsrPublishTest extends TestCase
         $cache = new ArraySsrResultCache();
         $cache->set('k1', new SsrDocument('<div></div>'));
 
-        $deleted = (new SsrPublish('http://ssr:4123', $cache, $transport))
+        $result = (new SsrPublish('http://ssr:4123', $cache, $transport))
             ->afterFeatureSourcePublish();
 
-        $this->assertSame(['doc::all'], $deleted);
+        $this->assertTrue($result->sidecarPurged);
+        $this->assertSame(['doc::all'], $result->deletedKeys);
         $this->assertSame([], $transport->payload);
         $this->assertNull($cache->get('k1'));
     }
 
-    public function test_sidecar_failure_still_flushes_php(): void
+    public function test_sidecar_failure_does_not_flush_php(): void
     {
         $transport = new class implements SsrPurgeTransport {
             public function postPurge(
@@ -93,10 +95,56 @@ final class SsrPublishTest extends TestCase
         $cache = new ArraySsrResultCache();
         $cache->set('k1', new SsrDocument('<div></div>'));
 
-        $deleted = (new SsrPublish('http://ssr:4123', $cache, $transport))
+        $result = (new SsrPublish('http://ssr:4123', $cache, $transport))
             ->afterFeatureSourcePublish(['https://example.test/a.geojson']);
 
-        $this->assertSame([], $deleted);
+        $this->assertFalse($result->sidecarPurged);
+        $this->assertSame([], $result->deletedKeys);
+        $this->assertNotNull($cache->get('k1'));
+    }
+
+    public function test_missing_sidecar_url_still_flushes_php(): void
+    {
+        $cache = new ArraySsrResultCache();
+        $cache->set('k1', new SsrDocument('<div></div>'));
+
+        $result = (new SsrPublish(null, $cache))->afterFeatureSourcePublish([
+            'https://example.test/a.geojson',
+        ]);
+
+        $this->assertFalse($result->sidecarPurged);
+        $this->assertSame([], $result->deletedKeys);
         $this->assertNull($cache->get('k1'));
+    }
+
+    public function test_blank_urls_are_not_a_purge_all(): void
+    {
+        $transport = new class implements SsrPurgeTransport {
+            public int $calls = 0;
+
+            public function postPurge(
+                string $url,
+                array $payload,
+                float $timeoutSeconds,
+                float $connectTimeoutSeconds = 0.1,
+            ): array {
+                $this->calls++;
+
+                return [];
+            }
+        };
+        $cache = new ArraySsrResultCache();
+        $cache->set('k1', new SsrDocument('<div></div>'));
+
+        try {
+            (new SsrPublish('http://ssr:4123', $cache, $transport))
+                ->afterFeatureSourcePublish(['']);
+            $this->fail('expected InvalidArgumentException');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('only empty urls', $e->getMessage());
+        }
+
+        $this->assertSame(0, $transport->calls);
+        $this->assertNotNull($cache->get('k1'));
     }
 }

@@ -35,8 +35,8 @@ final class Renderer
         $assetBase = rtrim($request->assetBase, '/');
         $parts = [
             sprintf(
-                '<link rel="stylesheet" href="%s/assets/mapsight.css">',
-                $this->escapeAttr($assetBase),
+                '<link rel="stylesheet" href="%s">',
+                $this->escapeAttr($this->assetUrl($assetBase, 'mapsight.css', $request->assetVersion)),
             ),
         ];
 
@@ -45,47 +45,47 @@ final class Renderer
         $ssrSkipped = false;
 
         if ($request->ssrUrl !== null && $request->ssrUrl !== '') {
-            if (!$this->circuitBreaker->allow()) {
+            $cacheKey = SsrCacheKey::for($request);
+            $cached = $this->resultCache?->get($cacheKey);
+            if ($cached !== null && $cached->html !== '') {
+                $containerHtml = $cached->html;
+                $pageMeta = $this->pageMetaForRequest($request, $cached->pageMeta);
+            } elseif (!$this->circuitBreaker->allow()) {
                 $ssrSkipped = true;
             } else {
-                $cacheKey = SsrCacheKey::for($request);
-                $cached = $this->resultCache?->get($cacheKey);
-                if ($cached !== null && $cached->html !== '') {
-                    $containerHtml = $cached->html;
-                    $pageMeta = $this->pageMetaForRequest($request, $cached->pageMeta);
-                } else {
-                    try {
-                        $transport = $this->ssrTransport ?? new NativeSsrTransport();
-                        $renderUrl = rtrim($request->ssrUrl, '/') . '/v1/render';
-                        $payload = [
-                            'v' => 1,
-                            'preset' => $request->preset,
-                            'options' => $this->ssrOptions($request),
-                        ];
-                        if ($request->requestId !== null && $request->requestId !== '') {
-                            $payload['requestId'] = $request->requestId;
-                        }
-                        if ($request->assetVersion !== null && $request->assetVersion !== '') {
-                            $payload['assetVersion'] = $request->assetVersion;
-                        }
-                        $document = $transport->postJson(
-                            $renderUrl,
-                            $payload,
-                            $request->ssrTimeoutSeconds,
-                            self::ssrHeaders($request),
-                            $request->ssrConnectTimeoutSeconds,
-                        );
-                        $this->circuitBreaker->recordSuccess();
-                        $containerHtml = $document->html;
-                        $pageMeta = $this->pageMetaForRequest($request, $document->pageMeta);
-                        $this->resultCache?->set(
-                            $cacheKey,
-                            new SsrDocument($containerHtml, $pageMeta),
-                        );
-                    } catch (\Throwable) {
-                        $this->circuitBreaker->recordFailure();
-                        $ssrSkipped = true;
+                try {
+                    $transport = $this->ssrTransport ?? new NativeSsrTransport();
+                    $renderUrl = rtrim($request->ssrUrl, '/') . '/v1/render';
+                    $payload = [
+                        'v' => 1,
+                        'preset' => $request->preset,
+                        'options' => $this->ssrOptions($request),
+                    ];
+                    if ($request->requestId !== null && $request->requestId !== '') {
+                        $payload['requestId'] = $request->requestId;
                     }
+                    if ($request->assetVersion !== null && $request->assetVersion !== '') {
+                        $payload['assetVersion'] = $request->assetVersion;
+                    }
+                    $document = $transport->postJson(
+                        $renderUrl,
+                        $payload,
+                        $request->ssrTimeoutSeconds,
+                        self::ssrHeaders($request),
+                        $request->ssrConnectTimeoutSeconds,
+                    );
+                    $this->circuitBreaker->recordSuccess();
+                    $containerHtml = $document->html;
+                    $pageMeta = $this->pageMetaForRequest($request, $document->pageMeta);
+                    $this->resultCache?->set(
+                        $cacheKey,
+                        new SsrDocument($containerHtml, $pageMeta),
+                    );
+                } catch (SsrUnavailable) {
+                    $this->circuitBreaker->recordFailure();
+                    $ssrSkipped = true;
+                } catch (\Throwable) {
+                    $ssrSkipped = true;
                 }
             }
         }
@@ -127,6 +127,12 @@ final class Renderer
         $ogImage = $request->resolvedOgImage();
         if ($ogImage !== null) {
             $options['ogImage'] = $ogImage;
+        }
+        if ($request->locale !== null && $request->locale !== '') {
+            $options['locale'] = $request->locale;
+        }
+        if ($request->deviceClass !== null && $request->deviceClass !== '') {
+            $options['deviceClass'] = $request->deviceClass;
         }
 
         return $options;
@@ -182,8 +188,8 @@ final class Renderer
             | JSON_HEX_QUOT,
         );
 
-        $embedUrl = $this->moduleUrl($assetBase, 'embed.js', $request->assetVersion);
-        $presetUrl = $this->moduleUrl($assetBase, $preset . '.js', $request->assetVersion);
+        $embedUrl = $this->assetUrl($assetBase, 'embed.js', $request->assetVersion);
+        $presetUrl = $this->assetUrl($assetBase, $preset . '.js', $request->assetVersion);
 
         return <<<HTML
 <script type="module">
@@ -197,7 +203,7 @@ mountEmbed("{$this->escapeJsDoubleQuoted($request->containerId)}",
 HTML;
     }
 
-    private function moduleUrl(string $assetBase, string $file, ?string $assetVersion): string
+    private function assetUrl(string $assetBase, string $file, ?string $assetVersion): string
     {
         $url = $assetBase . '/assets/' . $file;
         if ($assetVersion !== null && $assetVersion !== '') {

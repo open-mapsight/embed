@@ -32,7 +32,7 @@ final class NativeSsrPurgeTransport implements SsrPurgeTransport
     ): string {
         $handle = curl_init($url);
         if ($handle === false) {
-            throw new \RuntimeException('SSR purge request failed');
+            throw new SsrUnavailable('SSR purge request failed');
         }
 
         curl_setopt_array($handle, [
@@ -47,10 +47,10 @@ final class NativeSsrPurgeTransport implements SsrPurgeTransport
         $body = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
         $error = curl_error($handle);
-        curl_close($handle);
+        unset($handle);
 
         if ($body === false) {
-            throw new \RuntimeException($error !== '' ? $error : 'SSR purge request failed');
+            throw new SsrUnavailable($error !== '' ? $error : 'SSR purge request failed');
         }
 
         if ($status === 204) {

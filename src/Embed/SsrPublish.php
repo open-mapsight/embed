@@ -21,15 +21,38 @@ final class SsrPublish
      * Call before the next page render. Prefer absolute GeoJSON URLs.
      * Omit $urls or pass [] to clear the whole sidecar cache.
      *
+     * A list that filters down to no URLs (e.g. `['']`) is an error, not a
+     * purge-all. A failed sidecar POST does not flush the PHP cache.
+     *
      * @param list<string>|null $urls
-     * @return list<string> deleted sidecar cache keys (empty when sidecar is unset or fail-open)
      */
-    public function afterFeatureSourcePublish(?array $urls = null): array
+    public function afterFeatureSourcePublish(?array $urls = null): SsrPurgeResult
     {
-        $deleted = $this->purgeSidecar($urls);
+        if ($this->ssrUrl === null || $this->ssrUrl === '') {
+            $this->resultCache?->flush();
+
+            return new SsrPurgeResult(false, []);
+        }
+
+        $payload = $this->purgePayload($urls);
+
+        try {
+            $transport = $this->transport ?? new NativeSsrPurgeTransport();
+            $deleted = $transport->postPurge(
+                rtrim($this->ssrUrl, '/') . '/purge',
+                $payload,
+                $this->timeoutSeconds,
+                $this->connectTimeoutSeconds,
+            );
+        } catch (\Throwable $error) {
+            error_log('mapsight ssr purge failed: ' . $error->getMessage());
+
+            return new SsrPurgeResult(false, []);
+        }
+
         $this->resultCache?->flush();
 
-        return $deleted;
+        return new SsrPurgeResult(true, $deleted);
     }
 
     public static function fromEnv(?SsrResultCache $resultCache = null): self
@@ -44,32 +67,24 @@ final class SsrPublish
 
     /**
      * @param list<string>|null $urls
-     * @return list<string>
+     * @return array<string, mixed>
      */
-    private function purgeSidecar(?array $urls): array
+    private function purgePayload(?array $urls): array
     {
-        if ($this->ssrUrl === null || $this->ssrUrl === '') {
+        if ($urls === null || $urls === []) {
             return [];
         }
 
-        $payload = [];
-        if ($urls !== null && $urls !== []) {
-            $payload['urls'] = array_values(array_filter($urls, static fn (mixed $url): bool => is_string($url) && $url !== ''));
-        }
-
-        try {
-            $transport = $this->transport ?? new NativeSsrPurgeTransport();
-
-            return $transport->postPurge(
-                rtrim($this->ssrUrl, '/') . '/purge',
-                $payload,
-                $this->timeoutSeconds,
-                $this->connectTimeoutSeconds,
+        $filtered = array_values(array_filter(
+            $urls,
+            static fn (mixed $url): bool => is_string($url) && $url !== '',
+        ));
+        if ($filtered === []) {
+            throw new \InvalidArgumentException(
+                'afterFeatureSourcePublish received only empty urls; refusing to purge the whole sidecar cache',
             );
-        } catch (\Throwable $error) {
-            error_log('mapsight ssr purge failed: ' . $error->getMessage());
-
-            return [];
         }
+
+        return ['urls' => $filtered];
     }
 }
