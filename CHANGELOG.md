@@ -28,7 +28,8 @@ shared by `Renderer` and `SsrPublish`. `render()` returns `RenderedEmbed`
 - PHPStan at max, `composer validate --strict`, `--prefer-lowest` CI,
   `failOnDeprecation`. `SECURITY.md`.
 - Streams fallback reads `$http_response_header` in the `file_get_contents`
-  caller (PHP < 8.4). `$GLOBALS['http_response_header']` is empty there.
+  caller (PHP < 8.4). That identifier lives in a class loaded only then, so
+  PHP 8.5 does not compile the deprecation. `$GLOBALS` is empty there.
 
 ## 0.3.0 — 2026-09-12
 
