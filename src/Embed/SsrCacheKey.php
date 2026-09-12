@@ -6,16 +6,15 @@ namespace OpenMapsight\Embed;
 
 /**
  * Stable key for a v1 SSR placement: config + locale/deviceClass + assetVersion
- * + requestUrl + contract. requestUrl must be in the key so `?module=` /
- * `?feature=` (and similar search) does not reuse another URL's HTML.
- * pageOrigin / ogImage are in the key so cached pageMeta stays absolute.
+ * + normalised requestUrl + contract. pageOrigin / ogImage stay in the key
+ * so cached pageMeta stays absolute.
  */
 final class SsrCacheKey
 {
-    public static function for(EmbedRequest $request): string
+    public static function for(EmbedRequest $request, ?string $requestUrl): string
     {
         $payload = [
-            'v' => 1,
+            'v' => SsrContract::VERSION,
             'preset' => $request->preset,
             'containerId' => $request->containerId,
             'containerClassName' => $request->containerClassName,
@@ -23,15 +22,24 @@ final class SsrCacheKey
             'assetVersion' => $request->assetVersion,
             'locale' => $request->locale,
             'deviceClass' => $request->deviceClass,
-            'requestUrl' => $request->resolvedRequestUrl(),
-            'pageOrigin' => $request->resolvedPageOrigin(),
-            'ogImage' => $request->resolvedOgImage(),
+            'requestUrl' => $requestUrl,
+            'pageOrigin' => self::nonEmpty($request->pageOrigin),
+            'ogImage' => self::nonEmpty($request->ogImage),
         ];
 
         return hash(
             'sha256',
             json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         );
+    }
+
+    private static function nonEmpty(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $value;
     }
 
     private static function normalize(mixed $value): mixed

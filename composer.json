@@ -21,9 +21,12 @@
     "source": "https://github.com/open-mapsight/embed"
   },
   "require": {
-    "php": "^8.2"
+    "php": "^8.2",
+    "psr/log": "^3",
+    "psr/simple-cache": "^3"
   },
   "require-dev": {
+    "phpstan/phpstan": "^2",
     "phpunit/phpunit": "^11.0"
   },
   "suggest": {
@@ -46,6 +49,8 @@
     "sort-packages": true
   },
   "scripts": {
-    "test": "phpunit"
+    "test": "phpunit",
+    "phpstan": "phpstan analyse",
+    "validate": "composer validate --strict"
   }
 }

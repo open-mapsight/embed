@@ -4,19 +4,12 @@ declare(strict_types=1);
 
 namespace OpenMapsight\Embed;
 
+/**
+ * Raw HTTP to the sidecar. One interface for render, purge, and health.
+ *
+ * @throws SsrUnavailable on connect errors, timeouts, and other transport failures
+ */
 interface SsrTransport
 {
-    /**
-     * @param array<string, mixed> $payload
-     * @param array<string, string> $headers
-     *
-     * @throws \Throwable when the sidecar is unreachable or returns a non-success body
-     */
-    public function postJson(
-        string $url,
-        array $payload,
-        float $timeoutSeconds,
-        array $headers = [],
-        float $connectTimeoutSeconds = 0.1,
-    ): SsrDocument;
+    public function send(SsrHttpRequest $request): SsrHttpResponse;
 }

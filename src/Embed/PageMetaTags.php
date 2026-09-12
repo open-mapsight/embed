@@ -50,7 +50,7 @@ final class PageMetaTags
     }
 
     /**
-     * Canonical, Open Graph, and JSON-LD tags. Caller still sets `<title>`.
+     * Canonical, description, Open Graph, and JSON-LD tags. Caller still sets `<title>`.
      */
     public static function html(?PlacePageMeta $meta): string
     {
@@ -70,6 +70,7 @@ final class PageMetaTags
 
         return implode("\n", [
             '<link rel="canonical" href="' . self::escape($fields['canonicalUrl']) . '">',
+            '<meta name="description" content="' . self::escape($fields['description']) . '">',
             '<meta property="og:title" content="' . self::escape($fields['ogTitle']) . '">',
             '<meta property="og:description" content="' . self::escape($fields['ogDescription']) . '">',
             '<meta property="og:url" content="' . self::escape($fields['ogUrl']) . '">',

@@ -1,6 +1,10 @@
 # Exclude tests and development configuration from distributed archives
 tests/ export-ignore
 phpunit.xml export-ignore
+phpstan.neon export-ignore
 .phpunit.cache/ export-ignore
 .github/ export-ignore
 .idea/ export-ignore
+REVIEW.md export-ignore
+DECISIONS.md export-ignore
+

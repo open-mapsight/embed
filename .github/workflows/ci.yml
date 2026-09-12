@@ -34,8 +34,36 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: mbstring, xml, curl
 
+      - name: Validate composer.json
+        run: composer validate --strict
+
       - name: Install dependencies
         run: composer install --no-progress --prefer-dist
+
+      - name: PHPStan
+        run: composer phpstan
+
+      - name: Run tests
+        run: composer test
+
+  prefer-lowest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Tests (PHP 8.2, prefer-lowest)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, curl
+
+      - name: Install lowest dependencies
+        run: composer update --no-progress --prefer-lowest --prefer-stable
 
       - name: Run tests
         run: composer test

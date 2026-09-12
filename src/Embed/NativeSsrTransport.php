@@ -5,129 +5,159 @@ declare(strict_types=1);
 namespace OpenMapsight\Embed;
 
 /**
- * Loopback/compose SSR POST via cURL when available, else PHP streams.
+ * Loopback/compose HTTP via cURL when available, else PHP streams.
+ *
+ * Streams `timeout` is per read, not a total budget, so a slow-dripping
+ * sidecar can exceed {@see SsrHttpRequest::$timeoutSeconds}. Streams also
+ * ignore `connectTimeoutSeconds` (needs ext-curl).
  */
 final class NativeSsrTransport implements SsrTransport
 {
-    private const MAX_BODY_BYTES = 262144;
-
-    public function postJson(
-        string $url,
-        array $payload,
-        float $timeoutSeconds,
-        array $headers = [],
-        float $connectTimeoutSeconds = 0.1,
-    ): SsrDocument {
-        $json = json_encode($payload, JSON_THROW_ON_ERROR);
-        if (strlen($json) > self::MAX_BODY_BYTES) {
-            throw new \RuntimeException('SSR request body exceeds size cap');
-        }
-
+    public function send(SsrHttpRequest $request): SsrHttpResponse
+    {
         if (function_exists('curl_init')) {
-            return $this->finish($this->postWithCurl($url, $json, $timeoutSeconds, $connectTimeoutSeconds, $headers));
+            return $this->withCurl($request);
         }
 
-        return $this->finish($this->postWithStreams($url, $json, $timeoutSeconds, $headers));
+        return $this->withStreams($request);
     }
 
-    /**
-     * @param array<string, string> $headers
-     */
-    private function postWithCurl(
-        string $url,
-        string $json,
-        float $timeoutSeconds,
-        float $connectTimeoutSeconds,
-        array $headers,
-    ): string {
-        $headerLines = ['Content-Type: application/json'];
-        foreach ($headers as $name => $value) {
-            $headerLines[] = $name . ': ' . $value;
-        }
-
-        $handle = curl_init($url);
+    private function withCurl(SsrHttpRequest $request): SsrHttpResponse
+    {
+        $handle = curl_init($request->url);
         if ($handle === false) {
-            throw new \RuntimeException('SSR request failed');
+            throw new SsrUnavailable('SSR request failed');
         }
 
-        curl_setopt_array($handle, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $json,
+        $method = $request->method;
+        if ($method === '') {
+            throw new SsrUnavailable('SSR request failed');
+        }
+
+        $headerLines = $this->headerLines($request);
+        $opts = [
+            CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_HTTPHEADER => $headerLines,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CONNECTTIMEOUT_MS => max(1, (int) round($connectTimeoutSeconds * 1000)),
-            CURLOPT_TIMEOUT_MS => max(1, (int) round($timeoutSeconds * 1000)),
-        ]);
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => 0,
+            CURLOPT_CONNECTTIMEOUT_MS => max(1, (int) round($request->connectTimeoutSeconds * 1000)),
+            CURLOPT_TIMEOUT_MS => max(1, (int) round($request->timeoutSeconds * 1000)),
+        ];
+        if ($request->body !== null) {
+            $opts[CURLOPT_POSTFIELDS] = $request->body;
+        }
+
+        curl_setopt_array($handle, $opts);
 
         $body = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+        $contentType = curl_getinfo($handle, CURLINFO_CONTENT_TYPE);
         $error = curl_error($handle);
-        curl_close($handle);
+        unset($handle);
 
-        if ($body === false) {
-            throw new \RuntimeException($error !== '' ? $error : 'SSR request failed');
+        if (!is_string($body)) {
+            throw new SsrUnavailable($error !== '' ? $error : 'SSR request failed');
         }
 
-        if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException('SSR HTTP status ' . $status);
+        return new SsrHttpResponse(
+            $status,
+            is_string($contentType) && $contentType !== '' ? $contentType : null,
+            $body,
+        );
+    }
+
+    private function withStreams(SsrHttpRequest $request): SsrHttpResponse
+    {
+        $headerLines = $this->headerLines($request);
+        if ($request->body !== null) {
+            $headerLines[] = 'Content-Length: ' . strlen($request->body);
         }
 
-        return $body;
+        $http = [
+            'method' => $request->method,
+            'header' => implode("\r\n", $headerLines) . "\r\n",
+            'timeout' => $request->timeoutSeconds,
+            'ignore_errors' => true,
+            'follow_location' => 0,
+        ];
+        if ($request->body !== null) {
+            $http['content'] = $request->body;
+        }
+
+        // PHP 8.5 deprecates the $http_response_header identifier itself.
+        // Keep that name out of this file; PHP < 8.4 loads a sidecar class.
+        if (function_exists('http_get_last_response_headers')) {
+            $body = @file_get_contents($request->url, false, stream_context_create(['http' => $http]));
+            if ($body === false) {
+                throw new SsrUnavailable('SSR request failed');
+            }
+
+            return $this->responseFromHeaderLines(
+                $this->stringLines(http_get_last_response_headers()),
+                $body,
+            );
+        }
+
+        [$body, $headers] = LegacyHttpStreamFetch::get($request->url, $http);
+
+        return $this->responseFromHeaderLines($this->stringLines($headers), $body);
     }
 
     /**
-     * @param array<string, string> $headers
+     * @return list<string>
      */
-    private function postWithStreams(string $url, string $json, float $timeoutSeconds, array $headers): string
+    private function headerLines(SsrHttpRequest $request): array
     {
-        $headerLines = [
-            'Content-Type: application/json',
-            'Content-Length: ' . strlen($json),
-        ];
+        $lines = ['Expect:'];
+        $headers = $request->headers;
+        if ($request->body !== null && !isset($headers['Content-Type']) && !isset($headers['content-type'])) {
+            $headers['Content-Type'] = 'application/json';
+        }
         foreach ($headers as $name => $value) {
-            $headerLines[] = $name . ': ' . $value;
+            $lines[] = $name . ': ' . $value;
         }
 
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => implode("\r\n", $headerLines) . "\r\n",
-                'content' => $json,
-                'timeout' => $timeoutSeconds,
-                'ignore_errors' => true,
-            ],
-        ]);
-
-        $body = @file_get_contents($url, false, $context);
-        if ($body === false) {
-            throw new \RuntimeException('SSR request failed');
-        }
-
-        $status = 0;
-        if (isset($http_response_header[0])
-            && preg_match('/\s(\d{3})\s/', $http_response_header[0], $matches) === 1
-        ) {
-            $status = (int) $matches[1];
-        }
-
-        if ($status < 200 || $status >= 300) {
-            throw new \RuntimeException('SSR HTTP status ' . $status);
-        }
-
-        return $body;
+        return $lines;
     }
 
-    private function finish(string $body): SsrDocument
+    /**
+     * @param list<string> $headers
+     */
+    private function responseFromHeaderLines(array $headers, string $body): SsrHttpResponse
     {
-        $trimmed = ltrim($body);
-        if (str_starts_with($trimmed, '{')) {
-            return SsrV1Document::fromResponse($body);
+        $status = 0;
+        $contentType = null;
+        if (isset($headers[0]) && preg_match('/\s(\d{3})\s/', $headers[0], $matches) === 1) {
+            $status = (int) $matches[1];
+        }
+        foreach ($headers as $line) {
+            if (stripos($line, 'Content-Type:') === 0) {
+                $contentType = trim(substr($line, strlen('Content-Type:')));
+                break;
+            }
         }
 
-        if ($body === '' || !str_contains($body, 'data-dehydrated-state')) {
-            throw new \RuntimeException('SSR response missing dehydrated state');
+        return new SsrHttpResponse($status, $contentType, $body);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function stringLines(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
         }
 
-        return new SsrDocument($body, null);
+        $headers = [];
+        foreach ($raw as $line) {
+            if (is_string($line)) {
+                $headers[] = $line;
+            }
+        }
+
+        return $headers;
     }
 }
