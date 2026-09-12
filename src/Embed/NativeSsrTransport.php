@@ -91,22 +91,15 @@ final class NativeSsrTransport implements SsrTransport
             throw new SsrUnavailable('SSR request failed');
         }
 
-        $status = 0;
-        $contentType = null;
-        $responseHeaders = $this->lastResponseHeaders();
-        if (isset($responseHeaders[0])
-            && preg_match('/\s(\d{3})\s/', $responseHeaders[0], $matches) === 1
-        ) {
-            $status = (int) $matches[1];
-        }
-        foreach ($responseHeaders as $line) {
-            if (stripos($line, 'Content-Type:') === 0) {
-                $contentType = trim(substr($line, strlen('Content-Type:')));
-                break;
-            }
+        // file_get_contents() writes $http_response_header in this scope
+        // (PHP < 8.4). That is not $GLOBALS['http_response_header'].
+        if (function_exists('http_get_last_response_headers')) {
+            $responseHeaders = $this->stringLines(http_get_last_response_headers());
+        } else {
+            $responseHeaders = $this->stringLines($http_response_header);
         }
 
-        return new SsrHttpResponse($status, $contentType, $body);
+        return $this->responseFromHeaderLines($responseHeaders, $body);
     }
 
     /**
@@ -126,25 +119,31 @@ final class NativeSsrTransport implements SsrTransport
         return $lines;
     }
 
-    /** @return list<string> */
-    private function lastResponseHeaders(): array
+    /**
+     * @param list<string> $headers
+     */
+    private function responseFromHeaderLines(array $headers, string $body): SsrHttpResponse
     {
-        if (function_exists('http_get_last_response_headers')) {
-            $fetched = http_get_last_response_headers();
-            if (!is_array($fetched)) {
-                return [];
+        $status = 0;
+        $contentType = null;
+        if (isset($headers[0]) && preg_match('/\s(\d{3})\s/', $headers[0], $matches) === 1) {
+            $status = (int) $matches[1];
+        }
+        foreach ($headers as $line) {
+            if (stripos($line, 'Content-Type:') === 0) {
+                $contentType = trim(substr($line, strlen('Content-Type:')));
+                break;
             }
-            $headers = [];
-            foreach ($fetched as $line) {
-                if (is_string($line)) {
-                    $headers[] = $line;
-                }
-            }
-
-            return $headers;
         }
 
-        $raw = $GLOBALS['http_response_header'] ?? [];
+        return new SsrHttpResponse($status, $contentType, $body);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function stringLines(mixed $raw): array
+    {
         if (!is_array($raw)) {
             return [];
         }

@@ -27,6 +27,8 @@ shared by `Renderer` and `SsrPublish`. `render()` returns `RenderedEmbed`
   hardening. `health()` and `warm()`. `Testing\FakeSsrTransport`.
 - PHPStan at max, `composer validate --strict`, `--prefer-lowest` CI,
   `failOnDeprecation`. `SECURITY.md`.
+- Streams fallback reads `$http_response_header` in the `file_get_contents`
+  caller (PHP < 8.4). `$GLOBALS['http_response_header']` is empty there.
 
 ## 0.3.0 — 2026-09-12
 

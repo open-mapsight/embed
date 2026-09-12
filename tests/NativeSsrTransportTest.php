@@ -125,6 +125,26 @@ final class NativeSsrTransportTest extends TestCase
         $this->assertStringContainsString('data-dehydrated-state', $response->body);
     }
 
+    public function test_streams_fallback_reads_status_and_content_type(): void
+    {
+        $transport = new NativeSsrTransport();
+        $withStreams = new \ReflectionMethod($transport, 'withStreams');
+        $response = $withStreams->invoke($transport, new SsrHttpRequest(
+            'POST',
+            $this->url('/v1/render'),
+            ['Accept' => 'application/json', 'X-Request-Id' => 'req-streams'],
+            '{"v":1}',
+            2.0,
+            0.5,
+        ));
+
+        $this->assertSame(200, $response->status);
+        $this->assertNotFalse(stripos((string) $response->contentType, 'application/json'));
+        $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame(1, $data['v'] ?? null);
+        $this->assertSame('req-streams', $data['state']['headers']['x-request-id'] ?? null);
+    }
+
     private function url(string $path): string
     {
         return 'http://127.0.0.1:' . self::$port . $path;
