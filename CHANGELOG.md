@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-10-29
 
 PHP 8.5 deprecation fixes for the 0.3 line. No API change.
 
