@@ -86,21 +86,24 @@ final class NativeSsrTransport implements SsrTransport
             $http['content'] = $request->body;
         }
 
-        // PHP 8.5 deprecates the $http_response_header identifier itself.
-        // Keep that name out of this file; PHP < 8.4 loads a sidecar class.
-        if (function_exists('http_get_last_response_headers')) {
-            $body = @file_get_contents($request->url, false, stream_context_create(['http' => $http]));
-            if ($body === false) {
-                throw new SsrUnavailable('SSR request failed');
-            }
-
-            return $this->responseFromHeaderLines(
-                $this->stringLines(http_get_last_response_headers()),
-                $body,
-            );
+        // Read the response headers from the stream metadata: PHP 8.5
+        // deprecates $http_response_header, and http_get_last_response_headers()
+        // needs PHP 8.4.
+        $stream = @fopen($request->url, 'rb', false, stream_context_create(['http' => $http]));
+        if ($stream === false) {
+            throw new SsrUnavailable('SSR request failed');
         }
 
-        [$body, $headers] = LegacyHttpStreamFetch::get($request->url, $http);
+        try {
+            $headers = stream_get_meta_data($stream)['wrapper_data'] ?? null;
+            $body = stream_get_contents($stream);
+        } finally {
+            fclose($stream);
+        }
+
+        if ($body === false) {
+            throw new SsrUnavailable('SSR request failed');
+        }
 
         return $this->responseFromHeaderLines($this->stringLines($headers), $body);
     }

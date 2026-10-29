@@ -27,9 +27,9 @@ shared by `Renderer` and `SsrPublish`. `render()` returns `RenderedEmbed`
   hardening. `health()` and `warm()`. `Testing\FakeSsrTransport`.
 - PHPStan at max, `composer validate --strict`, `--prefer-lowest` CI,
   `failOnDeprecation`. `SECURITY.md`.
-- Streams fallback reads `$http_response_header` in the `file_get_contents`
-  caller (PHP < 8.4). That identifier lives in a class loaded only then, so
-  PHP 8.5 does not compile the deprecation. `$GLOBALS` is empty there.
+- Streams fallback reads the response headers from the stream metadata
+  (`stream_get_meta_data()`), not `$http_response_header` (deprecated in
+  PHP 8.5) or `$GLOBALS` (empty there). One code path for PHP 8.2–8.5.
 
 ## 0.3.0 — 2026-09-12
 
