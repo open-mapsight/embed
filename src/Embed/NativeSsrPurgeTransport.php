@@ -47,7 +47,7 @@ final class NativeSsrPurgeTransport implements SsrPurgeTransport
         $body = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
         $error = curl_error($handle);
-        curl_close($handle);
+        unset($handle);
 
         if ($body === false) {
             throw new \RuntimeException($error !== '' ? $error : 'SSR purge request failed');
@@ -76,14 +76,27 @@ final class NativeSsrPurgeTransport implements SsrPurgeTransport
             ],
         ]);
 
-        $body = @file_get_contents($url, false, $context);
+        // Response headers come from the stream metadata: PHP 8.5 deprecates
+        // $http_response_header, and http_get_last_response_headers() needs 8.4.
+        $stream = @fopen($url, 'rb', false, $context);
+        if ($stream === false) {
+            throw new \RuntimeException('SSR purge request failed');
+        }
+
+        try {
+            $headers = stream_get_meta_data($stream)['wrapper_data'] ?? null;
+            $body = stream_get_contents($stream);
+        } finally {
+            fclose($stream);
+        }
+
         if ($body === false) {
             throw new \RuntimeException('SSR purge request failed');
         }
 
         $status = 0;
-        if (isset($http_response_header[0])
-            && preg_match('/\s(\d{3})\s/', $http_response_header[0], $matches) === 1
+        if (is_array($headers) && is_string($headers[0] ?? null)
+            && preg_match('/\s(\d{3})\s/', $headers[0], $matches) === 1
         ) {
             $status = (int) $matches[1];
         }

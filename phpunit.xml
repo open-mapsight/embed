@@ -3,10 +3,13 @@
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="vendor/autoload.php"
          colors="true"
-         cacheDirectory=".phpunit.cache">
+         cacheDirectory=".phpunit.cache"
+         failOnDeprecation="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true">
     <testsuites>
         <testsuite name="OpenMapsight Embed">
             <directory>tests</directory>
+            <exclude>tests/fixtures</exclude>
         </testsuite>
     </testsuites>
 </phpunit>
