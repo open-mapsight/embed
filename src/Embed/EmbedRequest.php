@@ -40,6 +40,8 @@ final class EmbedRequest
         public readonly ?string $pageOrigin = null,
         public readonly ?string $ogImage = null,
         public readonly ?string $scriptNonce = null,
+        /** Absolute URL of the host's own Open Graph endpoint ({@see SsrClient::ogImage()}). */
+        public readonly ?string $ogImageEndpoint = null,
     ) {
         self::assertJsIdentifier($this->preset, 'preset');
         if (preg_match('/^[A-Za-z][A-Za-z0-9_:.-]*$/', $this->containerId) !== 1) {

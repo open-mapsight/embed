@@ -27,6 +27,14 @@ shared by `Renderer` and `SsrPublish`. `render()` returns `RenderedEmbed`
   hardening. `health()` and `warm()`. `Testing\FakeSsrTransport`.
 - PHPStan at max, `composer validate --strict`, `--prefer-lowest` CI,
   `failOnDeprecation`. `SECURITY.md`.
+- `SsrClient::ogImage(EmbedRequest)` fetches a place's Open Graph card from
+  sidecar `POST /v1/og` (`@mapsight/ssr-sidecar` 0.2) with the same body as
+  the render, for the host's own public OG endpoint: `SsrOgImage`
+  (`contentType`, `body`) or null (no share param, breaker open, sidecar
+  404 or error). `EmbedRequest::$ogImageEndpoint` forwards that endpoint as
+  `options.ogImageEndpoint`, so the sidecar links
+  `{endpoint}?feature=…&module=…&src=…` as `og:image` of a place; it is
+  part of `SsrCacheKey`.
 - Streams fallback reads the response headers from the stream metadata
   (`stream_get_meta_data()`), not `$http_response_header` (deprecated in
   PHP 8.5) or `$GLOBALS` (empty there). One code path for PHP 8.2–8.5.
