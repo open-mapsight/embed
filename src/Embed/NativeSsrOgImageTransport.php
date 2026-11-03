@@ -132,7 +132,7 @@ final class NativeSsrOgImageTransport implements SsrOgImageTransport
         try {
             $headers = stream_get_meta_data($stream)['wrapper_data'] ?? null;
             $body = stream_get_contents($stream, self::MAX_IMAGE_BYTES + 1);
-            $timedOut = stream_get_meta_data($stream)['timed_out'] ?? false;
+            $timedOut = stream_get_meta_data($stream)['timed_out'];
         } finally {
             fclose($stream);
         }

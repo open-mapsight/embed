@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3 — 2026-11-03
+
+Read the guaranteed stream timeout metadata flag directly, keeping the OG
+transport compatible with strict static analysis. Runtime behavior is unchanged.
+
 ## 0.3.2 — 2026-11-03
 
 Open Graph cards from the sidecar (`POST /v1/og`, `@mapsight/ssr-sidecar`
