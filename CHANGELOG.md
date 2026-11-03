@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.2 — Unreleased
+## 0.3.2 — 2026-11-03
 
 Open Graph cards from the sidecar (`POST /v1/og`, `@mapsight/ssr-sidecar`
 0.2) for the host's own public OG endpoint. No change for hosts that do not
