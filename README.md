@@ -226,6 +226,40 @@ here:
 
 ---
 
+## Open Graph cards
+
+Sidecar 0.2 renders a place's Open Graph card on `POST /v1/og` (same body as
+`/v1/render`). The sidecar stays off public ingress, so the host serves the
+card from an endpoint of its own and names it on the placement:
+
+```php
+// On the page: the sidecar links {endpoint}?feature=…&module=…&src=…
+// as og:image of a place instead of the static card.
+$request = new EmbedRequest(
+    preset: 'simpleMap',
+    containerId: 'mapsight-embed-1',
+    config: $mapOptions, // the same preset options used on the page
+    requestUrl: '/map/?feature=poi-1', // use the endpoint's validated share params
+    pageOrigin: 'https://www.example.com',
+    ogImageEndpoint: 'https://www.example.com/mapsight/og.php',
+);
+
+// On that endpoint, with the same EmbedRequest (requestUrl carrying the
+// feature, module and src params of the request):
+$image = $ssr->ogImage($request);
+if ($image === null) {
+    header('Location: https://www.example.com/plan/img/og-default.png', true, 302);
+    exit;
+}
+header('Content-Type: ' . $image->contentType);
+header('Cache-Control: public, max-age=3600');
+echo $image->body;
+```
+
+`ogImage()` is fail-open: null without a share param on `requestUrl`, while
+the breaker is open, and on a sidecar `404` or error. Add `src` to
+`shareParams` when your request URLs carry a feature-source hint.
+
 ## Publish / purge
 
 When a feature-source or GeoJSON file changes, call `SsrPublish` **before**

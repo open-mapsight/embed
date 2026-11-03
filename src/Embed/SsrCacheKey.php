@@ -6,8 +6,8 @@ namespace OpenMapsight\Embed;
 
 /**
  * Stable key for a v1 SSR placement: config + locale/deviceClass + assetVersion
- * + normalised requestUrl + contract. pageOrigin / ogImage stay in the key
- * so cached pageMeta stays absolute.
+ * + normalised requestUrl + contract. pageOrigin / ogImage / ogImageEndpoint
+ * stay in the key so cached pageMeta stays absolute and links the right card.
  */
 final class SsrCacheKey
 {
@@ -25,6 +25,7 @@ final class SsrCacheKey
             'requestUrl' => $requestUrl,
             'pageOrigin' => self::nonEmpty($request->pageOrigin),
             'ogImage' => self::nonEmpty($request->ogImage),
+            'ogImageEndpoint' => self::nonEmpty($request->ogImageEndpoint),
         ];
 
         return hash(

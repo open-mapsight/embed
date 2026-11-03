@@ -20,6 +20,9 @@ final class SsrClient
 
     public const MAX_REQUEST_URL_BYTES = 2048;
 
+    /** Cards are a few dozen KB; anything larger is not a card. */
+    public const MAX_IMAGE_BYTES = 4194304;
+
     private const MAX_BODY_BYTES = 262144;
 
     /** @var list<string> */
@@ -142,6 +145,52 @@ final class SsrClient
         return $this->resolve($request, true)->outcome;
     }
 
+    /**
+     * The sidecar's Open Graph card of the place on `$request->requestUrl`
+     * (`?feature=`), for the host's own public OG endpoint. Same payload as
+     * the page render, so both resolve the same place.
+     *
+     * Fail-open: null when the request has no share param, the breaker is
+     * open, the sidecar has no card (404) or fails. Serve the static card then.
+     */
+    public function ogImage(EmbedRequest $request): ?SsrOgImage
+    {
+        $started = microtime(true);
+        $requestUrl = $this->normalizeRequestUrl($request->requestUrl);
+        if (!$this->requestHasPageMetaParam($requestUrl)) {
+            return null;
+        }
+        if (!$this->breaker->allow()) {
+            $this->logger->warning('mapsight ssr og skipped', [
+                'reason' => 'breaker_open',
+                'url' => rtrim($this->ssrUrl, '/') . '/v1/og',
+                'request_id' => $request->requestId,
+            ]);
+
+            return null;
+        }
+
+        try {
+            $image = $this->fetchOgImage($request, $requestUrl);
+            $this->breaker->recordSuccess();
+
+            return $image;
+        } catch (SsrUnavailable $error) {
+            $this->noteBreakerFailure();
+        } catch (\Throwable $error) {
+            // Bad request or response: not the sidecar's health.
+        }
+        $this->logger->warning('mapsight ssr og skipped', [
+            'reason' => $error->getMessage(),
+            'status' => self::statusFromMessage($error->getMessage()),
+            'url' => rtrim($this->ssrUrl, '/') . '/v1/og',
+            'elapsed_ms' => $this->elapsedMs($started),
+            'request_id' => $request->requestId,
+        ]);
+
+        return null;
+    }
+
     public function health(): bool
     {
         try {
@@ -254,41 +303,12 @@ final class SsrClient
 
     private function fetchDocument(EmbedRequest $request, ?string $requestUrl): SsrDocument
     {
-        $payload = [
-            'v' => SsrContract::VERSION,
-            'preset' => $request->preset,
-            'options' => $this->ssrOptions($request, $requestUrl),
-        ];
-        if ($request->requestId !== null && $request->requestId !== '') {
-            $payload['requestId'] = $request->requestId;
-        }
-        if ($request->assetVersion !== null && $request->assetVersion !== '') {
-            $payload['assetVersion'] = $request->assetVersion;
-        }
-
-        try {
-            $json = json_encode($payload, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            throw new SsrClientError('SSR request body is not JSON', 0, $e);
-        }
-        if (strlen($json) > self::MAX_BODY_BYTES) {
-            throw new SsrClientError('SSR request body exceeds size cap');
-        }
-
-        $headers = ['Accept' => 'application/json'];
-        if ($request->requestId !== null && $request->requestId !== '') {
-            $headers['X-Request-Id'] = $request->requestId;
-        }
-        if ($request->assetVersion !== null && $request->assetVersion !== '') {
-            $headers['X-Mapsight-Asset-Version'] = $request->assetVersion;
-        }
-
         $url = rtrim($this->ssrUrl, '/') . '/v1/render';
         $response = $this->transport->send(new SsrHttpRequest(
             'POST',
             $url,
-            $headers,
-            $json,
+            ['Accept' => 'application/json'] + $this->requestHeaders($request),
+            $this->encodeBody($request, $requestUrl),
             $this->timeoutSeconds,
             $this->connectTimeoutSeconds,
         ));
@@ -313,6 +333,80 @@ final class SsrClient
         );
     }
 
+    private function fetchOgImage(EmbedRequest $request, ?string $requestUrl): ?SsrOgImage
+    {
+        $response = $this->transport->send(new SsrHttpRequest(
+            'POST',
+            rtrim($this->ssrUrl, '/') . '/v1/og',
+            ['Accept' => 'image/png, application/json'] + $this->requestHeaders($request),
+            $this->encodeBody($request, $requestUrl),
+            $this->timeoutSeconds,
+            $this->connectTimeoutSeconds,
+        ));
+
+        if ($response->status === 404) {
+            return null;
+        }
+        if ($response->status >= 400 && $response->status < 500) {
+            throw new SsrClientError('SSR og HTTP status ' . $response->status);
+        }
+        if ($response->status < 200 || $response->status >= 300) {
+            throw new SsrUnavailable('SSR og HTTP status ' . $response->status);
+        }
+        $type = strtolower(trim((string) strtok((string) $response->contentType, ';')));
+        if (!str_starts_with($type, 'image/')) {
+            throw new SsrClientError('SSR og response Content-Type must be an image');
+        }
+        if ($response->body === '' || strlen($response->body) > self::MAX_IMAGE_BYTES) {
+            throw new SsrClientError('SSR og response has no usable image');
+        }
+
+        return new SsrOgImage($type, $response->body);
+    }
+
+    /** The v1 body both `/v1/render` and `/v1/og` take. */
+    private function encodeBody(EmbedRequest $request, ?string $requestUrl): string
+    {
+        $payload = [
+            'v' => SsrContract::VERSION,
+            'preset' => $request->preset,
+            'options' => $this->ssrOptions($request, $requestUrl),
+        ];
+        if ($request->requestId !== null && $request->requestId !== '') {
+            $payload['requestId'] = $request->requestId;
+        }
+        if ($request->assetVersion !== null && $request->assetVersion !== '') {
+            $payload['assetVersion'] = $request->assetVersion;
+        }
+
+        try {
+            $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new SsrClientError('SSR request body is not JSON', 0, $e);
+        }
+        if (strlen($json) > self::MAX_BODY_BYTES) {
+            throw new SsrClientError('SSR request body exceeds size cap');
+        }
+
+        return $json;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function requestHeaders(EmbedRequest $request): array
+    {
+        $headers = [];
+        if ($request->requestId !== null && $request->requestId !== '') {
+            $headers['X-Request-Id'] = $request->requestId;
+        }
+        if ($request->assetVersion !== null && $request->assetVersion !== '') {
+            $headers['X-Mapsight-Asset-Version'] = $request->assetVersion;
+        }
+
+        return $headers;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -331,6 +425,9 @@ final class SsrClient
         }
         if ($request->ogImage !== null && $request->ogImage !== '') {
             $options['ogImage'] = $request->ogImage;
+        }
+        if ($request->ogImageEndpoint !== null && $request->ogImageEndpoint !== '') {
+            $options['ogImageEndpoint'] = $request->ogImageEndpoint;
         }
         if ($request->locale !== null && $request->locale !== '') {
             $options['locale'] = $request->locale;
