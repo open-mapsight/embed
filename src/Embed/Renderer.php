@@ -57,22 +57,11 @@ final class Renderer
                     try {
                         $transport = $this->ssrTransport ?? new NativeSsrTransport();
                         $renderUrl = rtrim($request->ssrUrl, '/') . '/v1/render';
-                        $payload = [
-                            'v' => 1,
-                            'preset' => $request->preset,
-                            'options' => $this->ssrOptions($request),
-                        ];
-                        if ($request->requestId !== null && $request->requestId !== '') {
-                            $payload['requestId'] = $request->requestId;
-                        }
-                        if ($request->assetVersion !== null && $request->assetVersion !== '') {
-                            $payload['assetVersion'] = $request->assetVersion;
-                        }
                         $document = $transport->postJson(
                             $renderUrl,
-                            $payload,
+                            SsrRequestPayload::body($request),
                             $request->ssrTimeoutSeconds,
-                            self::ssrHeaders($request),
+                            SsrRequestPayload::headers($request),
                             $request->ssrConnectTimeoutSeconds,
                         );
                         $this->circuitBreaker->recordSuccess();
@@ -105,33 +94,6 @@ final class Renderer
         return new RenderedEmbed(implode("\n", $parts) . "\n", $pageMeta);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function ssrOptions(EmbedRequest $request): array
-    {
-        $options = array_merge($request->config, [
-            'containerId' => $request->containerId,
-        ]);
-        if ($request->containerClassName !== '') {
-            $options['containerClassName'] = $request->containerClassName;
-        }
-        $requestUrl = $request->resolvedRequestUrl();
-        if ($requestUrl !== null) {
-            $options['requestUrl'] = $requestUrl;
-        }
-        $pageOrigin = $request->resolvedPageOrigin();
-        if ($pageOrigin !== null) {
-            $options['pageOrigin'] = $pageOrigin;
-        }
-        $ogImage = $request->resolvedOgImage();
-        if ($ogImage !== null) {
-            $options['ogImage'] = $ogImage;
-        }
-
-        return $options;
-    }
-
     private function pageMetaForRequest(EmbedRequest $request, ?PlacePageMeta $pageMeta): ?PlacePageMeta
     {
         if (!$request->requestHasPageMetaParam()) {
@@ -139,20 +101,6 @@ final class Renderer
         }
 
         return $pageMeta;
-    }
-
-    /** @return array<string, string> */
-    private static function ssrHeaders(EmbedRequest $request): array
-    {
-        $headers = ['Accept' => 'application/json'];
-        if ($request->requestId !== null && $request->requestId !== '') {
-            $headers['X-Request-Id'] = $request->requestId;
-        }
-        if ($request->assetVersion !== null && $request->assetVersion !== '') {
-            $headers['X-Mapsight-Asset-Version'] = $request->assetVersion;
-        }
-
-        return $headers;
     }
 
     private function emptyContainer(EmbedRequest $request): string

@@ -28,6 +28,7 @@ final class EmbedRequest
         public readonly ?string $requestUrl = null,
         public readonly ?string $pageOrigin = null,
         public readonly ?string $ogImage = null,
+        public readonly ?string $ogImageEndpoint = null,
     ) {
         if ($this->preset === '') {
             throw new \InvalidArgumentException('preset must not be empty');
@@ -89,6 +90,31 @@ final class EmbedRequest
         $publicHost = getenv('PUBLIC_HOST');
         if (is_string($publicHost) && $publicHost !== '') {
             return 'https://' . $publicHost;
+        }
+
+        return null;
+    }
+
+    /**
+     * Absolute URL of the host's own Open Graph endpoint (a `SsrOgImageClient`
+     * behind it). Places then link `{endpoint}?feature=…` instead of the
+     * static card. Explicit field, then config.ogImageEndpoint, then env
+     * MAPSIGHT_OG_IMAGE_ENDPOINT.
+     */
+    public function resolvedOgImageEndpoint(): ?string
+    {
+        if ($this->ogImageEndpoint !== null && $this->ogImageEndpoint !== '') {
+            return $this->ogImageEndpoint;
+        }
+
+        $fromConfig = $this->config['ogImageEndpoint'] ?? null;
+        if (is_string($fromConfig) && $fromConfig !== '') {
+            return $fromConfig;
+        }
+
+        $fromEnv = getenv('MAPSIGHT_OG_IMAGE_ENDPOINT');
+        if (is_string($fromEnv) && $fromEnv !== '') {
+            return $fromEnv;
         }
 
         return null;

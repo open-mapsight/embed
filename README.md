@@ -69,6 +69,43 @@ echo $result->html;
 ]);
 ```
 
+## Open Graph cards
+
+Sidecar 0.2 renders a place's Open Graph card on `POST /v1/og` (same body as
+`/v1/render`). The sidecar stays off public ingress, so the host serves the
+card from an endpoint of its own and tells the sidecar about it:
+
+```php
+use OpenMapsight\Embed\SsrOgImageClient;
+
+// On the page: `ogImageEndpoint` makes the sidecar link
+// {endpoint}?feature=…&module=…&src=… as og:image of a place.
+$request = new EmbedRequest(
+    preset: 'simpleMap',
+    containerId: 'mapsight-embed-1',
+    config: $mapOptions, // the same preset options used on the page
+    ssrUrl: 'http://127.0.0.1:4123',
+    requestUrl: '/map/?feature=poi-1', // use the endpoint's validated share params
+    pageOrigin: 'https://www.example.com',
+    ogImageEndpoint: 'https://www.example.com/mapsight/og.php',
+);
+
+// On that endpoint, with the same EmbedRequest (requestUrl carrying the
+// feature, module and src params of the request):
+$image = (new SsrOgImageClient())->fetch($request);
+if ($image === null) {
+    header('Location: https://www.example.com/plan/img/og-default.png', true, 302);
+    exit;
+}
+header('Content-Type: ' . $image->contentType);
+header('Cache-Control: public, max-age=3600');
+echo $image->body;
+```
+
+`fetch()` is fail-open like the renderer: null without `ssrUrl`, without
+`?feature=` / `?module=` on `requestUrl`, while the breaker is open, and on
+a sidecar `404` or error.
+
 ```bash
 composer install
 composer test
